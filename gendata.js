@@ -3,7 +3,7 @@ const fs = require('fs');
 const utils = require('./src/utils');
 
 const MAX_RANDOM = 1000000000;
-const COUNT_NUMBERS = 10000000;
+const MAX_NUMS_COUNT = 1000000;
 const fileName = "data/bigdata.txt";
 
 
@@ -17,7 +17,7 @@ outFileStream.on('finish', () => {
 })
 
 
-for (let i=0; i<COUNT_NUMBERS; i+=1) {
+for (let i = 0; i < MAX_NUMS_COUNT; i += 1) {
 
   let chunk = utils.getRandomInt(MAX_RANDOM);
   outFileStream.write(`${chunk}\n`);

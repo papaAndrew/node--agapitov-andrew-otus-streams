@@ -1,7 +1,7 @@
 const fs = require('fs');
 
 function getRandomInt(max) {
-  return Math.floor(Math.random() * Math.floor(max));
+  return Math.ceil(Math.random() * max);
 }
 
 function deleteFile(fileName) {
