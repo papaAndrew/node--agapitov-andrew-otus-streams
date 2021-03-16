@@ -1,17 +1,18 @@
 const { Readable } = require('stream');
 const fs = require('fs');
 const utils = require('./src/utils');
-const { networkInterfaces } = require('os');
 
-
+/**/
 const BUFFER_SIZE = 1024 * 16;
 const MIN_QUE_LEN = 512;
 const MAX_QUE_LEN = 1024;
-
-const STATE_NONE = 0;
-const STATE_READ = 1;
-const STATE_END = 2;
-
+const DELAY_HASVALUE = 3;
+/* */
+/*
+const BUFFER_SIZE = 8;
+const MIN_QUE_LEN = 4;
+const MAX_QUE_LEN = 6;
+*/
 class StreamWrapper {
 
   constructor(fileName) {
@@ -33,7 +34,7 @@ class StreamWrapper {
     const stream = fs.createReadStream(this._fileName,  { highWaterMark: BUFFER_SIZE });
     return stream
     .on('data', (chunk) => {
-
+      //console.log("onData called");
       // склеиваем остаток от предыдущей чанки
       this._data = this._data.concat(chunk.toString());
       // парсим склейку
@@ -51,15 +52,18 @@ class StreamWrapper {
   }
 
   _checkCapacity() {
-    
+    //console.log(`_checkCapacity, quelen=${this._queue.length}`);
+
     if (this._queue.length < MIN_QUE_LEN) {
 
       if (this._stream.isPaused()) {
         this._stream.resume();
+        //console.log("stream resumed");
       }
     } else if (this._queue.length >= MAX_QUE_LEN) {
 
-      if (!this._stream.readableEnded) {
+      if (!this._stream.readableEnded && !this._stream.isPaused()) {
+        //console.log("stream paused");
         this._stream.pause();
       }
     }
@@ -72,8 +76,9 @@ class StreamWrapper {
    * @returns {string | null | undefined} очередное значение
    */
   get() {
+    //console.log("wrapper.get() called");
     let res;
-
+    
     if (this.hasValue()) {
       res = null;
 
@@ -81,6 +86,8 @@ class StreamWrapper {
         // шифтим очередь (мы не любим грязные функции)
         res = this._queue[0];
         this._queue = this._queue.slice(1);
+        
+        //console.log("que shifted");
 
         // проверяем размер очереди
         this._checkCapacity();
@@ -99,6 +106,8 @@ class StreamWrapper {
    * @returns 
    */
   hasValue() {
+    //console.log("hasValue()");
+    
     if (this._stream.readableEnded) {
       return true;
     } else {
@@ -106,76 +115,65 @@ class StreamWrapper {
     }
   }
 
+ 
   /**
    * ожидает aсинхронно новые данные и возвращает this по готовности.  
    * @returns 
    */
   swap () {
     
-    const DELAY_MS = 100;
-    const WAITING_TIMEOUT = 10;
+    const owner = this; 
 
+    //console.log("swap returns Promise");
     return new Promise((resolve) => {
-      if (this.hasValue()) {
-        resolve(this);
-      }
-      let i = 0;
-      while (!this.hasValue()) {
-        i+=1;
-        if (i > WAITING_TIMEOUT) break;
-        this._checkCapacity();
-        setTimeout({}, DELAY_MS);
-      }
-      
-      if (this.hasValue()) {
-        resolve(this);
-      } else {
-        new Error(`File ${this._fileName} access denied`);
-      }
+
+      function wait() {
+
+        if (owner.hasValue()) {
+          resolve(owner);
+          return;
+        }
+       setTimeout(wait, DELAY_HASVALUE);
+      } 
+  
+      wait();
     });
   }
   
-  swapSync () {
-    
-    const DELAY_MS = 100;
-    const WAITING_TIMEOUT = 10;
-
-    if (this.hasValue()) {
-      return this;
-    }
-
-    let i = 0;
-    while (!this.hasValue()) {
-      i+=1;
-      if (i > WAITING_TIMEOUT) break;
-      setTimeout(this._checkCapacity, DELAY_MS);
-    }
-    
-    if (this.hasValue()) {
-      return this;
-    } else {
-      throw new Error(`File ${this._fileName} access denied`);
-    }
-  }
-  
+ 
   /**
    * показывает текущее значение в очереди, или null, если поток завершен.
    * вызывать после проверки hasValue()
-   * @returns {null | string} 
+   * @returns { null | string} 
    */
   display() {
-    return this.isEnded() ? null : this._queue[0];
+    if (this._queue.length > 0) {
+      return  this._queue[0];
+    } else if (this._stream.readableEnded) {
+      return  null;
+    } else {
+      throw new Error("No value is visible");
+    }
   }
 }
 
 class OrderedReader extends Readable {
 
-  constructor(opt) {
+  constructor(dirName, opt) {
     super(opt);
 
+    this._paths = fs.readdirSync(dirName).map((fileName) => `${dirName}/${fileName}`);
     this._wrappers = [];
 
-    this._open();
+    //this._open();
+  }
+
+  _open() {
+    
+    if (!this._wrappers) 
+    this._paths.forEach((fileName) => {
+      this._addWrapper(`${fileName}`);
+    });
   }
 
   _addWrapper(fileName) {
@@ -185,69 +183,54 @@ class OrderedReader extends Readable {
     return wrapper;
   }
 
-  /**
-   * вычисляет раппер с минимальным значением
-   */
-  _getMinWrapper() {
-    //let wrapper;
+  async _get() {
 
-    /* try {
-      wrapper = this._wrappers[0].swap();
-    } catch (err) {
-      console.log(err);
-    }
-     */
-    return this._wrappers[0];
-    
+    let swaps = this._wrappers.map((wrapper) => wrapper.swap());
 
-    
-    /*
-    return this._handlers.reduce((winner, current) => {
-      let result = winner;
-
-      if (current.hasValue()) {
-        if (winner === null) {
+    const wrapper = await Promise.all(swaps)
+    .then((wrappers) => 
+      wrappers.reduce((winner, current) => {
+        let result = winner;
+        
+        if (!winner) {
           result = current;
-        } else if (current.value < winner.value) {
-          result = current;
+        } else {
+          const oldValue = winner.display();
+          if (oldValue) {
+            const newValue = current.display();
+            if (newValue && newValue < oldValue) {
+              result = current;
+            }
+          } else {
+            result = current;
+          }
         }
-      } 
-      return result;
-    });
-    */
+        return result;
+    }));
+
+    return wrapper;
   }
-
-
   /**
    * реализация метода чтения
    * @param {int} size 
    */
-  _read(size) {
-    
-    this._wrappers[0].swap()
-    .then(() => {
-      let chunk = null;
-      const wrapper = this._getMinWrapper();
-      if (wrapper) {
-        chunk = wrapper.get();
-        if (chunk !== null) {
-          chunk = Buffer.from(`${chunk}\n`) ;
-        }
-      }
-  
-      this.push(chunk);
-    })
-    .catch(console.log)
-  }
+  async _read(size) {
+    //console.log("_read()");
+    const wrapper = await this._get();
 
-  _open() {
-    const fileName = "data/out6";
-    this._addWrapper(fileName);
+    let chunk = wrapper.get();
+    
+    //console.log(`chunk`, chunk);
+
+    if (chunk !== null) {
+      chunk = Buffer.from(`${chunk}\n`) ;
+    }
+    this.push(chunk);
   }
 }
 
 
-const fileName = "data/reader-test";
+const fileName = "data/reader-out";
 utils.deleteFile(fileName);
 const writer = fs.createWriteStream(fileName);
 
@@ -261,4 +244,7 @@ reader.pipe(writer);
 3. включить настоящий стрим в раппере
 4. сделать метод wrapper.swap() синхронным
 5. сделать метод wrapper.swap() промисом
+6. для поиска минимального значения применить Promise.all()
+7. попробовать на двух файлах
+8. на всех файлах
 */
