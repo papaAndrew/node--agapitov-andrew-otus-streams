@@ -11,8 +11,13 @@ function deleteFile(fileName) {
   }
 }
 
+function canBeNumeric(str) {
+  return str.trim() === `${Number(str)}`;
+}
+
 
 module.exports = {
   getRandomInt,
   deleteFile, 
+  canBeNumeric
 };
