@@ -5,8 +5,8 @@ const utils = require('./utils');
 const BUFFER_SIZE = 1024 * 16;
 const MIN_QUE_LEN = 512;
 const MAX_QUE_LEN = 1024;
-const DELAY_TIMEOUT = 3;
 
+const DELAY_TIMEOUT = 3;
 const DELIM_EOL = `\n`;
 /**/
 

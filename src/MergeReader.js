@@ -41,11 +41,18 @@ class MergeReader extends Readable {
     return wrapper;
   }
 
+  /**
+   * сравнивает текущие значения в очередях рапперов, выбирает наименьший их них, вычитывает значение из очереди и готовит его для записи.
+   * для этого придется синхронизировать все потоки, чтобы в каждой очереди появился нулевой элемент, либо поток завершился
+   * @returns 
+   */
   async _get() {
 
     //let i = 0;
+    // синхронизация потоков
     let swaps = this._wrappers.map((wrapper) => wrapper.swap());
 
+    // вычисление раппера с наименьшим значением в нулевой ячейке
     const wrapper = await Promise.all(swaps)
     .then((wrappers) => {
       //console.log("rappers count", wrappers.length);
@@ -66,7 +73,6 @@ class MergeReader extends Readable {
           } else {
             //console.log(i, "oldValue < newValue", `${oldValue} < ${newValue}`);  
           }
-          
         } else {
           result = current;
           //console.log(i, "result = current");  
@@ -77,6 +83,7 @@ class MergeReader extends Readable {
       });
     });
 
+    // данные для записи
     if (wrapper) {
       return wrapper.get();
     } else {
