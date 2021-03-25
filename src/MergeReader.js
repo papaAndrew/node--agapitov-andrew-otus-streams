@@ -2,22 +2,36 @@ const { Readable } = require('stream');
 const fs = require('fs');
 const utils = require('./utils');
 
-/**/
+
 const BUFFER_SIZE = 1024 * 8;
 const MIN_QUE_LEN = 10;
 const MAX_QUE_LEN = 100;
 
 const DELAY_TIMEOUT = 3;
 const DELIM_EOL = `\n`;
-/**/
 
-class StreamWrapper {
+/**
+ * Обертка для файлового ReadStream.
+ * преобразует чанки в числа и аккумулирует их в массиве-очереди.
+ * предоставляет интерфейс для просмотра и вычитывания (со сдвигом) нулевого элемента очереди чисел.
+ * регулирует пропускную способность, приостанавливая чтение файла при достижении предельного размера очереди.
+ */
+ class StreamWrapper {
 
   constructor(fileName) {
 
     this._fileName = fileName;
+    /**
+     * временное хранилище для склеивания чисел в чанках
+     */
     this._data = "";
+    /**
+     * массив-очередь для записи распарсеных чисел
+     */
     this._queue = [];
+    /**
+     * поток для чтения файла
+     */
     this._stream = this._createStream();
   }
 
@@ -51,32 +65,26 @@ class StreamWrapper {
    * регулирование пропускной способности потока
    */
   _checkCapacity() {
-    //console.log(`_checkCapacity, quelen=${this._queue.length}`);
-
     if (this._queue.length <= MIN_QUE_LEN) {
 
       if (this._stream.isPaused()) {
         this._stream.resume();
-        //console.log("stream resumed");
       }
     } else if (this._queue.length >= MAX_QUE_LEN) {
 
       if (!this._stream.readableEnded && !this._stream.isPaused()) {
-        //console.log("stream paused");
         this._stream.pause();
       }
     }
   };
   
-
   /**
    * Шифтит очередь и возвращает очередное число
    * Если очередь пуста и поток  завершен, возвращает null, иначе undefined.
-   * Возобновляет чтение, если очередь уменьшилась
+   * Возобновляет чтение, если очередь уменьшилась 
    * @returns {string | null | undefined} очередное значение
    */
   get() {
-    //console.log("wrapper.get() called");
     let res;
     
     if (this.hasValue()) {
@@ -87,9 +95,6 @@ class StreamWrapper {
         res = this._queue[0];
         // шифтим очередь
         this._queue = this._queue.slice(1);
-        
-        //console.log("que shifted");
-
         // проверяем размер очереди
         this._checkCapacity();
       } 
@@ -98,7 +103,7 @@ class StreamWrapper {
   }
 
   /**
-   * показывает текущее значение в очереди, или null, если поток завершен.
+   * показывает текущее значение в очереди (без сдвига), или null, если поток завершен.
    * вызывать после проверки hasValue()
    * @returns { null | string} 
    */
@@ -107,7 +112,7 @@ class StreamWrapper {
 
         return Number(this._queue[0].trim());
     }
-    
+
     if (this._stream.readableEnded) {
       return null;
     } else {
@@ -133,14 +138,12 @@ class StreamWrapper {
   }
 
   /**
-   * ожидает aсинхронно новые данные и возвращает this по готовности.  
-   * @returns 
+   * промис, ожидающий aсинхронно новые данные, по готовности возвращает this  
+   * @returns {Promise}
    */
   swap () {
     
     const owner = this; 
-
-    //console.log("swap returns Promise");
     return new Promise((resolve) => {
 
       function waitForValue() {
@@ -160,7 +163,11 @@ class StreamWrapper {
 const STATE_NONE = 0;
 const STATE_READY = 1;
 const STATE_BUSY = 2;
-
+/**
+ * Реализует сортировку слиянием.
+ * читает файлы в массив потоков (точнее, конвертов wrapper), контролирует подкачку ими данных и выбирает один из них с наименьшим числом на выходе (очереди).
+ * наименьшее число вычитывает из очереди и присваивает себе
+ */
 class MergeReader extends Readable {
 
   constructor(dirName, opt) {
@@ -190,6 +197,11 @@ class MergeReader extends Readable {
     this._state = STATE_READY;
   }
 
+  /**
+   * создает поток (wrapper) для чтения указанного файла и помещает его в массив-коллектор
+   * @param {string} fileName 
+   * @returns 
+   */
   _addWrapper(fileName) {
 
     const wrapper = new StreamWrapper(fileName);
@@ -210,41 +222,31 @@ class MergeReader extends Readable {
     // вычисление раппера с наименьшим значением в нулевой ячейке
     const wrapper = await Promise.all(swaps)
     .then((wrappers) => {
-      //console.log("rappers count", wrappers.length);
 
       return wrappers.reduce((winner, current) => {
         let result = winner;
-        
         const oldValue = winner.display();
-        //console.log(i, "oldValue", oldValue);  
 
         if (oldValue) {
           const newValue = current.display();
-          //console.log(i, "newValue", newValue);  
 
           if (newValue && (newValue < oldValue)) {
-            //console.log(i, "newValue < oldValue", `${newValue} < ${oldValue}`);  
             result = current;
           } else {
             //console.log(i, "oldValue < newValue", `${oldValue} < ${newValue}`);  
           }
         } else {
           result = current;
-          //console.log(i, "result = current");  
         }
-        //i+=1;
-        //console.log(i, "return", result.display());  
         return result;
       });
     });
 
     this._count+=1;
     if (this._count % (this._wrappers.length * 10000) === 0) {
-      console.log(this._count, "words passed");
+      console.log(this._count, "words sorted");
       console.log(process.memoryUsage());
     }
-    
-
     // данные для записи
     if (wrapper) {
       return wrapper.get();
@@ -282,16 +284,4 @@ const writer = fs.createWriteStream(fileName);
 
 const reader = new MergeReader("data/sorted");
 reader.pipe(writer);
-*/
-
-/* Steps
-1. написать Readeble, который с использованием StreamWrapper копирует содержимое 1 файла 
-2. сделать метод wrapper.swap() промисом
-3. включить настоящий стрим в раппере
-4. сделать метод wrapper.swap() синхронным
-5. сделать метод wrapper.swap() промисом
-6. для поиска минимального значения применить Promise.all()
-7. попробовать на двух файлах
-8. на всех файлах
-9. вынести StreamWrapper в отдельный файл
 */

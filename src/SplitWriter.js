@@ -11,7 +11,9 @@ const BASE_NAME = "sorted";
 
 const numbersOnly = utils.canBeNumeric;
 
-
+/**
+ * Преобразует поток данных в числа, разбивает их на массивы заданной длины, которые сортирует в памяти и сохраняет в отдельные файлы
+ */
 class SplitWriter extends Writable  {
 
   constructor(dirName, opt) {
@@ -25,6 +27,9 @@ class SplitWriter extends Writable  {
     this._writer = this._createWriter();
   }
 
+  /**
+   * полготовка пространства для сохранения файлов
+   */
   _prepareDir() {
     utils.deleteFolderRecursive(this._dirName);
     fs.mkdirSync(this._dirName);
@@ -46,6 +51,12 @@ class SplitWriter extends Writable  {
     return fs.createWriteStream(fileName, { highWaterMark: BUFFER_SIZE });
   }
 
+  /**
+   * реализация метода записи
+   * @param {Buffer} chunk 
+   * @param {string} encoding 
+   * @param {Function} callback 
+   */
   _write(chunk, encoding, callback) {
 
     // склеиваем остаток от предыдущей чанки
@@ -68,6 +79,10 @@ class SplitWriter extends Writable  {
     callback();
   }
 
+  /**
+   * реализация финализатора
+   * @param {*} callback 
+   */
   _final(callback) {
     // пушим остатки
     if (numbersOnly(this._data)) {
